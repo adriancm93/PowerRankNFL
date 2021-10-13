@@ -1,130 +1,128 @@
 library(tidyverse)
 library(nflfastR)
-
-
-szn = 2020
-wk = 17
-
-s2020 = results_data %>% filter(season==szn,week==wk)
-
-s2020 = s2020 %>% 
-  mutate(
-    week_diff = week - game_week,
-    
-    weight2= case_when(
-      week_diff == 0 ~ 1,
-      week_diff == 1 ~ .9,
-      week_diff == 2 ~ .8,
-      week_diff == 3 ~ .7,
-      week_diff == 4 ~ .6,
-      week_diff == 5 ~ .5,
-      week_diff == 6 ~ .4,
-      week_diff == 7 ~ .3,
-      week_diff == 8 ~ .2,
-      week_diff == 9 ~ .1,
-      week_diff > 9 ~ .1
-    )
-    
-  )
-
-preds = lm(WEPADiff ~ as.factor(opponent) , data = s2020, weights = weight2) %>% predict()
-s2020$pred = preds
-s2020$epaadj = s2020$WEPADiff - s2020$pred
-res = s2020 %>% group_by(team) %>%  summarise(epaadj = mean(epaadj)) %>% arrange(desc(epaadj))
-
-
-res %>% filter(team=='KC')$epaadj
-
-# Bootstrap 95% CI for R-Squared
+library(caret)
 library(boot)
-# function to obtain R-Squared from the data
+
+setwd("~/GitHub/PowerRankNFL")
+
+#Load data
+maindata <- plyr::ldply(list.files('PowerRankingModeling/OutputData/DataForModeling',full.names = T), read.csv, header=TRUE)
 
 
+#Functions
 effect <- function(data, indices,t) {
   
-  d <- data[indices,] # allows boot to select sample
+  d <- data[indices,] 
   
-  preds = lm(WEPADiff ~ as.factor(opponent) , data = d, weights = weight2) %>% predict()
+  cols = c('WEPADiff', 'opponent')
+  dummies_ <- caret::dummyVars(WEPADiff ~ ., data = d[,cols])
+  dummies = predict(dummies_, newdata = d[,cols])
+  x = as.matrix(dummies)
+  model = glmnet::glmnet(x, d$WEPADiff, alpha = 0, family = 'gaussian', lambda = .001,weights =d$weight )
+  preds = predict(model, s = .001, newx = x)
   d$pred = preds
-  d$epaadj = d$WEPADiff - d$pred
-  res = d %>% group_by(team) %>%  summarise(epaadj = mean(epaadj)) %>% arrange(desc(epaadj))
+  d$AdjWEPADiff = d$WEPADiff - d$pred
+  summarize = d %>% group_by(team) %>%  summarise(AdjWEPADiff = mean(AdjWEPADiff)) %>% arrange(desc(AdjWEPADiff))
   
-  stat = res %>% filter(team == t)
-  return(stat$epaadj)
+  df_team = summarize %>% filter(team == t)
+  
+  return(df_team$AdjWEPADiff)
+}
+create_CI = function(vector,CI){
+  
+  lower = (1 - CI) / 2
+  upper = 1- lower
+  
+  ci = quantile(vector, c(lower,upper))
+  return(ci)
 }
 
-lst = list()
-for (team in unique(s2020$team)){
-  results <- boot(data=s2020, statistic=effect,
-                  R=1000, t=team)
-  df = data.frame('AdjWEPADiff' = results$t,'Team' = team)
+
+# maindata = maindata %>% 
+#    filter(season==szn,week==wk) %>% 
+#   mutate(
+#   weight = if_else(week_diff <0, .1, weight)
+# )
+
+#for (szn in min(maindata$season):max(maindata$season)){
+
+for (szn in 2021:2021){  
+  #Filter for season
+  seas = dplyr::filter(maindata, season == szn)
   
-  lst[[team]] = df
-  
+  for (wk in 5:5){
+    
+    #Filter for week
+    df = maindata %>% filter(season==szn,week==wk)
+    
+    # df = df %>% mutate(
+    #   weight = if_else(week_diff <0, .3, weight)
+    # )
+    
+    df1 = df %>% filter(week_diff >= 0)
+    #df2 = df %>% filter(week_diff < 0)
+    df = rbind(df1,df1)
+    
+    # if(wk %in% c(5,6,7)){
+    #   df = rbind(df,df)
+    # } else{
+    #   df = df
+    # }
+    
+    #Run bootstrap
+    lst = list()
+    for (team in unique(df$team)){
+      
+      try_again = TRUE
+      while (try_again == TRUE){
+        results <- try(boot(data=df, statistic=effect,
+                            R=600, t=team), silent=TRUE)
+        
+        if ('try-error' %in% class(results)){
+          print(paste(team,'Error: trying again'))
+          try_again = TRUE
+          
+        }
+        else{
+          print(paste(team,'Model converged'))
+          try_again = FALSE
+        }
+      }
+      
+      #Get results
+      df_out = data.frame('AdjWEPADiff' = results$t,'Team' = team,'Season'=szn, 'LatestWeek' = wk)
+      
+      rm(results)
+      
+      #Save to list
+      lst[[team]] = df_out
+      
+      rm(df_out)
+      }
+    
+    rm(df)
+    
+    #Prepare results
+    dataframe = dplyr::bind_rows(lst)
+      
+    #Summarize by team
+    summary = dataframe %>% group_by(
+      Team
+      ) %>% summarise(
+        LowerCI95 = create_CI(AdjWEPADiff,.95)[1],
+        UpperCI95 =create_CI(AdjWEPADiff,.95)[2],
+        LowerCI85 = create_CI(AdjWEPADiff,.85)[1],
+        UpperCI85 =create_CI(AdjWEPADiff,.85)[2],
+        AdjWEPADiff  = mean(AdjWEPADiff),
+        Season = unique(Season),
+        LatestWeek = unique(LatestWeek)
+      )
+    
+    #Save files
+    file_name = paste0(as.character(szn),'_',as.character(wk),'.csv')
+    write.csv(dataframe,paste0('PowerRankingModeling/OutputData/BootstrappedEstimates/',file_name),row.names = F)
+    write.csv(summary,paste0('PowerRankingModeling/OutputData/SummaryResults/',file_name),row.names = F)
+    }
 }
 
-results = dplyr::bind_rows(lst)
-colors = nflfastR::teams_colors_logos %>% 
-  select(team_abbr,team_color) %>% 
-  rename(
-    Team = team_abbr 
-  )
-
-results = merge(results,colors, on='Team')
-
-
-plot = results %>% 
-  filter(
-    Team %in% c('KC','JAX','SF')
-  ) 
-
-plotv = plot %>% ggplot(aes(x=AdjWEPADiff)) +
-  geom_density(aes(fill=Team),alpha=.6)+
-  scale_fill_manual(
-    values = unique(plot$team_color)) +
-  theme_classic() +
-  theme(
-    axis.title.y = element_blank(),
-    axis.ticks.y = element_blank(),
-    axis.text.y = element_blank()
-  ) +
-  labs(
-    title = 'Power Rankings 2020',
-  ) + ylim(c(0,.17))
-
-
-ggsave(filename = 'pr_ci.png',plot=plotv,height = 5, width = 8)
-
-summary_80 = results %>% 
-  group_by(
-    Team
-  ) %>% 
-  summarise( 
-    UCI = quantile(AdjWEPADiff, .90) ,
-    LCI = quantile(AdjWEPADiff, .10) ,
-    AdjWEPADiff = mean(AdjWEPADiff),
-  )
-
-
-plotv = summary_80 %>% 
-  arrange(AdjWEPADiff)%>%
-  ggplot(aes(x=factor(Team, level = Team),AdjWEPADiff)) + 
-  
-  geom_linerange(alpha = .7, color = 'gray40', linetype = 2,aes(ymin= LCI,
-                                                                ymax= UCI)) +
-  
-  geom_point(aes(fill = AdjWEPADiff),alpha = 1, color='gray20',pch=21,size=2.75) +
-  
-  geom_text(aes(label = round(AdjWEPADiff,1),y=AdjWEPADiff+.75),nudge_x = 0.4,size=2.7,alpha=0.5)  +
-  
-  coord_flip() + 
-  theme_classic()  + 
-  theme(
-    axis.title.y = element_blank(),
-    plot.title = element_text(hjust = 0.5),
-    plot.subtitle = element_text(hjust = 0.5),
-    legend.position = 'none'
-  ) + scale_x_discrete(expand = c(.04,.04))
-
-plotv
 

@@ -181,4 +181,4 @@ final_name_fix = {
 }
 wepa_df.loc[wepa_df ['team'].isin(final_name_fix.keys()),'team'] = wepa_df.loc[wepa_df ['team'].isin(final_name_fix.keys()),'team'].map(final_name_fix)
 wepa_df.loc[wepa_df ['opponent'].isin(final_name_fix.keys()),'opponent'] = wepa_df.loc[wepa_df ['opponent'].isin(final_name_fix.keys()),'opponent'].map(final_name_fix)
-wepa_df.to_csv('{0}/WEPA_{1}.csv'.format(output_folder,current_season),index=False)
+wepa_df.to_csv('{0}/WEPA_{1}.csv'.format(output_folder,starting_season),index=False)
