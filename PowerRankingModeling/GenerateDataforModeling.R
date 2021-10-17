@@ -20,7 +20,7 @@ for (
   sub = maindata %>% filter(season == szn)
   prev_sub = maindata %>% filter(season == (szn-1))
   
-  for (wk in 3:max(sub$week)){
+  for (wk in 1:max(sub$week)){
     
     #Filter data
     data = maindata %>% filter(
@@ -31,23 +31,23 @@ for (
       prev_season_data = 0
       )
     
-    #Add prior data if needed
-    if (wk <= 7){
-    
-      prior_data = maindata %>% filter(
-        season == (szn - 1),
-        week > max(prev_sub$week) - (7 - wk)
-      ) %>% 
-        mutate(
-          prev_season_data = 1,
-          game_week = week)
-
-      data = rbind(data,prior_data)
-      
-    } else{
-      
-      data=data
-    }
+    # #Add prior data if needed
+    # if (wk <= 7){
+    # 
+    #   prior_data = maindata %>% filter(
+    #     season == (szn - 1),
+    #     week > max(prev_sub$week) - (7 - wk)
+    #   ) %>% 
+    #     mutate(
+    #       prev_season_data = 1,
+    #       game_week = week)
+    # 
+    #   data = rbind(data,prior_data)
+    #   
+    # } else{
+    #   
+    #   data=data
+    # }
     
     game = data %>% 
       mutate(
@@ -68,21 +68,21 @@ for (
       mutate(season=szn,week=wk) %>% 
       arrange(game_id) %>% 
       mutate(
-        week_diff = week - game_week ,
-        weight = case_when(
-          week_diff == 0 ~ 1,
-          week_diff == 1 ~ 1,
-          week_diff == 2 ~ 1,
-          week_diff == 3 ~ .9,
-          week_diff == 4 ~ .8,
-          week_diff == 5 ~ .7,
-          week_diff == 6 ~ .6,
-          week_diff == 7 ~ .5,
-          week_diff == 8 ~ .4,
-          week_diff == 9 ~ .3,
-          week_diff > 9 ~ .3
-        ),
-        weight = if_else(prev_season_data == 1, .2,weight)
+        week_diff = week - game_week
+        # weight = case_when(
+        #   week_diff == 0 ~ 1,
+        #   week_diff == 1 ~ 1,
+        #   week_diff == 2 ~ 1,
+        #   week_diff == 3 ~ .9,
+        #   week_diff == 4 ~ .8,
+        #   week_diff == 5 ~ .7,
+        #   week_diff == 6 ~ .6,
+        #   week_diff == 7 ~ .5,
+        #   week_diff == 8 ~ .4,
+        #   week_diff == 9 ~ .3,
+        #   week_diff > 9 ~ .3
+        # ),
+        # weight = if_else(prev_season_data == 1, .2,weight)
       )
     
     #file DF

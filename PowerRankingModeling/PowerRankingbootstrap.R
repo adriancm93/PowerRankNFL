@@ -8,26 +8,28 @@ setwd("~/GitHub/PowerRankNFL")
 #Load data
 maindata <- plyr::ldply(list.files('PowerRankingModeling/OutputData/DataForModeling',full.names = T), read.csv, header=TRUE)
 
-
 #Functions
 effect <- function(data, indices,t) {
   
   d <- data[indices,] 
   
-  cols = c('WEPADiff', 'opponent')
+  cols = c('WEPADiff', 'opponent','team')
   dummies_ <- caret::dummyVars(WEPADiff ~ ., data = d[,cols])
   dummies = predict(dummies_, newdata = d[,cols])
   x = as.matrix(dummies)
-  model = glmnet::glmnet(x, d$WEPADiff, alpha = 0, family = 'gaussian', lambda = .001,weights =d$weight )
-  preds = predict(model, s = .001, newx = x)
-  d$pred = preds
-  d$AdjWEPADiff = d$WEPADiff - d$pred
-  summarize = d %>% group_by(team) %>%  summarise(AdjWEPADiff = mean(AdjWEPADiff)) %>% arrange(desc(AdjWEPADiff))
   
-  df_team = summarize %>% filter(team == t)
+  model = glmnet::glmnet(x, d$WEPADiff, alpha = 0, family = 'gaussian', lambda = .001)
   
-  return(df_team$AdjWEPADiff)
+  stat = data.frame('Team' = rownames(model$beta), 
+                    'Coef' = as.vector(model$beta)) %>% 
+    filter(grepl('team', Team))  %>% 
+    mutate(
+      Team = stringr::str_remove(Team, 'team'),
+    )  %>%  filter(Team == t) %>% pull(Coef)
+  
+  return(stat)
 }
+
 create_CI = function(vector,CI){
   
   lower = (1 - CI) / 2
@@ -37,37 +39,16 @@ create_CI = function(vector,CI){
   return(ci)
 }
 
-
-# maindata = maindata %>% 
-#    filter(season==szn,week==wk) %>% 
-#   mutate(
-#   weight = if_else(week_diff <0, .1, weight)
-# )
-
-#for (szn in min(maindata$season):max(maindata$season)){
-
-for (szn in 2021:2021){  
+for (szn in 2012:2013){  
   #Filter for season
   seas = dplyr::filter(maindata, season == szn)
   
-  for (wk in 5:5){
+  for (wk in 3:6){
     
     #Filter for week
     df = maindata %>% filter(season==szn,week==wk)
     
-    # df = df %>% mutate(
-    #   weight = if_else(week_diff <0, .3, weight)
-    # )
-    
-    df1 = df %>% filter(week_diff >= 0)
-    #df2 = df %>% filter(week_diff < 0)
-    df = rbind(df1,df1)
-    
-    # if(wk %in% c(5,6,7)){
-    #   df = rbind(df,df)
-    # } else{
-    #   df = df
-    # }
+    df = rbind(df,df)
     
     #Run bootstrap
     lst = list()
@@ -76,7 +57,7 @@ for (szn in 2021:2021){
       try_again = TRUE
       while (try_again == TRUE){
         results <- try(boot(data=df, statistic=effect,
-                            R=600, t=team), silent=TRUE)
+                            R=300, t=team), silent=TRUE)
         
         if ('try-error' %in% class(results)){
           print(paste(team,'Error: trying again'))
@@ -124,5 +105,3 @@ for (szn in 2021:2021){
     write.csv(summary,paste0('PowerRankingModeling/OutputData/SummaryResults/',file_name),row.names = F)
     }
 }
-
-
